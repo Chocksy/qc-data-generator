@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:py-vollib-vectorized.readthedocs.io)"
+    ],
+    "deny": []
+  }
+}

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fast-options-generator"
+version = "1.0.0"
+description = "High-performance options data generator for QuantConnect LEAN"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    {name = "Fast Options Generator", email = "noreply@example.com"},
+]
+keywords = ["quantconnect", "options", "trading", "data-generation", "finance"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+dependencies = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0", 
+    "scipy>=1.7.0",
+    "yfinance>=0.2.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black>=21.0",
+    "flake8>=3.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/fast-options-generator"
+Repository = "https://github.com/yourusername/fast-options-generator"
+Documentation = "https://github.com/yourusername/fast-options-generator#readme"
+Issues = "https://github.com/yourusername/fast-options-generator/issues"
+
+[project.scripts]
+fast-options-generator = "fast_options_generator:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fast_options_generator.py"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+line_length = 100
