@@ -3,7 +3,9 @@
     "allow": [
       "WebFetch(domain:github.com)",
       "WebFetch(domain:pypi.org)",
-      "WebFetch(domain:py-vollib-vectorized.readthedocs.io)"
+      "WebFetch(domain:py-vollib-vectorized.readthedocs.io)",
+      "Bash(find:*)",
+      "Bash(unzip:*)"
     ],
     "deny": []
   }
