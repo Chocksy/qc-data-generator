@@ -5,7 +5,8 @@
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:py-vollib-vectorized.readthedocs.io)",
       "Bash(find:*)",
-      "Bash(unzip:*)"
+      "Bash(unzip:*)",
+      "Bash(ls:*)"
     ],
     "deny": []
   }

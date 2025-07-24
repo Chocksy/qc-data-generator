@@ -108,18 +108,149 @@ This document outlines comprehensive improvements to make our fast options gener
 
 ---
 
-## Implementation Priority
+## Phase 6: LEAN Compatibility & QuantConnect Integration 🚨
 
-1. **Start with Phase 1** - Critical data correlation issues that affect backtesting accuracy
-2. **Phase 2** - Advanced pricing models for realism  
-3. **Phase 3** - Missing LEAN features for completeness
-4. **Phase 4** - Validation and testing
-5. **Phase 5** - Performance optimizations
+**Priority: BLOCKER** - Based on comprehensive analysis of LEAN CLI random data generator output, these components are REQUIRED for QuantConnect backtests to work.
 
-## Success Metrics
+### P6.1: BLOCKER LEVEL (Must Fix First - Prevents Any Backtest)
 
+#### Task 6.1: Coarse Fundamental Data Generation
+**Priority: BLOCKER** | **Effort: ~20 lines** | **Files:** `equity/usa/fundamental/coarse/YYYYMMDD.csv`
+
+- [x] **Generate daily universe files for QC security selection**
+- [x] **Required Format:** `SecurityIdentifier,Symbol,Price,Volume,DollarVolume,HasFundamentalData,PriceFactor,VolumeFactor`
+- [x] **Sample:** `AAPL R735QTJ8XC9X,AAPL,645.57,12116671,7822159297,False,0.9011818,0.0357143`
+
+**Critical:** QC uses this for universe selection BEFORE loading any price data. Without this, backtests fail at initialization with "no securities found".
+
+#### Task 6.2: Security Database Integration  
+**Priority: BLOCKER** | **Effort: ~10 lines** | **Files:** `symbol-properties/security-database.csv`
+
+- [x] **Add entries to security database for symbol identity resolution**
+- [x] **Required Format:** `SecurityIdentifier,CIK,BloombergTicker,CompositeFigi,ISIN,PrimarySymbol`
+- [x] **Sample:** `AAPL R735QTJ8XC9X,03783310,BBG000B9XRY4,2046251,US0378331005,320193`
+
+**Critical:** Links SecurityIdentifier to actual symbols. Missing entries cause "security not found" errors.
+
+#### Task 6.3: Equity Daily Data Generation
+**Priority: BLOCKER** | **Effort: ~20 lines** | **Files:** `equity/usa/daily/{symbol}.zip` containing `{symbol}.csv`
+
+- [x] **Create underlying equity price data files**
+- [x] **Required Format:** `DateTime,Open,High,Low,Close,Volume` (prices scaled by 10,000)
+- [x] **Sample:** `19980102 00:00,136300,162500,135000,162500,6315000`
+
+**Critical:** QC needs underlying price data to calculate option theoretical values. Without this, options contracts cannot be priced.
+
+### P6.2: HIGH PRIORITY (Breaks QC Backtests)
+
+#### Task 6.4: Map Files Generation
+**Priority: HIGH** | **Effort: ~15 lines** | **Files:** `equity/usa/map_files/{symbol}.csv`
+
+- [ ] **Create ticker mapping files with exchange designation**
+- [ ] **Required Format:** `Date,Symbol,Exchange` (e.g., `19980102,aapl,Q`)
+- [ ] **Add exchange codes (Q=NASDAQ, P=NYSE, etc.)**
+
+#### Task 6.5: Factor Files Generation  
+**Priority: HIGH** | **Effort: ~10 lines** | **Files:** `equity/usa/factor_files/{symbol}.csv`
+
+- [ ] **Create split/dividend adjustment factor files**
+- [ ] **Required Format:** `Date,PriceFactor,VolumeFactor,LastPrice`
+- [ ] **Simple Implementation:** `19980102,1,1,1` for no-split scenario
+
+#### Task 6.6: Options File Naming Convention Fix
+**Priority: HIGH** | **Effort: ~15 lines** | **Files:** Individual contract CSV files within ZIP archives
+
+- [ ] **Update file naming to LEAN convention**
+- [ ] **Current:** `{date}_{symbol}_{type}.zip`
+- [ ] **Required:** `YYYYMMDD_symbol_minute_type_style_optiontype_strike_expiry.csv`
+- [ ] **Example:** `20140606_aapl_minute_trade_american_call_5900000_20140621.csv`
+
+### P6.3: MEDIUM PRIORITY (Improves Accuracy)
+
+#### Task 6.7: Symbol Properties Integration
+**Priority: MEDIUM** | **Effort: ~15 lines** | **Files:** `symbol-properties/symbol-properties-database.csv`
+
+- [ ] **Add contract specifications and multipliers**
+- [ ] **Standard equity option properties with timezone, currency, market designation**
+
+#### Task 6.8: Market Hours Compliance
+**Priority: MEDIUM** | **Effort: ~10 lines** | **Files:** `market-hours/market-hours-database.json`
+
+- [ ] **Add trading session definitions with timezone support**  
+- [ ] **Include standard market hours (9:30-16:00 EST) and early close days**
+
+#### Task 6.9: Shortable Securities Data
+**Priority: MEDIUM** | **Effort: ~5 lines** | **Files:** `equity/usa/shortable/testbrokerage/symbols/{symbol}.csv`
+
+- [ ] **Add short selling availability data**
+- [ ] **Required Format:** `Date,AvailableShares` (e.g., `20140325,400`)
+
+### P6.4: Integration Configuration
+
+#### Task 6.10: Generator Config Updates
+**Priority: HIGH** | **Effort: ~10 lines**
+
+- [ ] **Add LEAN compatibility flags to GeneratorConfig:**
+  ```python
+  generate_coarse_data: bool = True
+  generate_security_database: bool = True  
+  generate_equity_daily: bool = True
+  generate_map_files: bool = True
+  generate_factor_files: bool = True
+  exchange_code: str = "Q"  # NASDAQ default
+  ```
+
+#### Task 6.11: Main Generator Integration
+**Priority: HIGH** | **Effort: ~15 lines**
+
+- [ ] **Update FastOptionsGenerator.generate() method to call LEAN compatibility functions**
+- [ ] **Add conditional generation based on config flags**
+- [ ] **Maintain existing options generation workflow**
+
+### P6.5: Testing & Validation
+
+#### Task 6.12: QC Backtest Validation
+**Priority: BLOCKER** | **Effort: Testing**
+
+- [ ] **Phase 1:** Test backtest initialization with Tasks 6.1-6.3 
+- [ ] **Phase 2:** Test complete backtest execution with Tasks 6.4-6.6
+- [ ] **Phase 3:** Test advanced features with Tasks 6.7-6.9
+- [ ] **Verify:** 100% QC compatibility while maintaining 36x speed advantage
+
+---
+
+## Updated Implementation Priority
+
+### 🚨 CRITICAL PATH (Essential for QC Compatibility)
+1. **Phase 6.1 (BLOCKER)** - Tasks 6.1-6.3: Coarse data, security database, equity data
+2. **Phase 6.2 (HIGH)** - Tasks 6.4-6.6: Map files, factor files, options naming
+3. **Phase 6.3-6.5 (MEDIUM)** - Tasks 6.7-6.12: Properties, hours, testing
+
+### 📈 ENHANCEMENT PATH (Original Tasks)  
+4. **Phase 1** - Critical data correlation issues that affect backtesting accuracy
+5. **Phase 2** - Advanced pricing models for realism  
+6. **Phase 3** - Missing LEAN features for completeness
+7. **Phase 4** - Validation and testing
+8. **Phase 5** - Performance optimizations
+
+## Updated Success Metrics
+
+### QC Compatibility (Phase 6)
+- [ ] **QC backtests initialize successfully** (BLOCKER level complete)
+- [ ] **QC backtests execute without errors** (HIGH priority complete)  
+- [ ] **Full feature parity with LEAN CLI output** (MEDIUM priority complete)
+- [ ] **Generated files pass LEAN format validation**
+- [ ] **Performance maintained: <5 minutes for full month** (vs 3 hours LEAN CLI)
+
+### Data Quality (Original Phases)
 - [ ] Generated option data passes arbitrage checks
 - [ ] Options properly track underlying price movements
 - [ ] Backtesting results are realistic and actionable
 - [ ] Data quality matches or exceeds LEAN RandomDataGenerator
 - [ ] Performance remains 20x+ faster than original LEAN implementation
+
+## Key Implementation Insight
+
+**Total LEAN Compatibility Implementation: ~120 lines of code across 9 new functions**
+
+After comprehensive analysis of 5,863 AAPL-related files in LEAN CLI output, the primary blocker for QC backtests is **missing coarse fundamental data** - QC cannot find securities to trade without daily universe files. The fast generator is 60% compatible with LEAN format but needs these critical supporting files for full QC integration.

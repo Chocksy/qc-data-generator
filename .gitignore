@@ -61,3 +61,6 @@ Thumbs.db
 
 # uv
 .uv_cache/
+
+# Data
+temp_extract/

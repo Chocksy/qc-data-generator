@@ -113,6 +113,13 @@ class GeneratorConfig:
     generate_universes: bool = True  # Generate universe data files
     copy_target_dir: Optional[str] = None  # Target directory for copying (None = no copying)
     include_coarse_universe: bool = False  # Generate equity universe files
+    # LEAN compatibility flags for QuantConnect integration
+    generate_coarse_data: bool = True  # Generate coarse fundamental data
+    generate_security_database: bool = True  # Generate security database entries
+    generate_equity_daily: bool = True  # Generate equity daily data files
+    generate_map_files: bool = True  # Generate map files for symbol resolution
+    generate_factor_files: bool = True  # Generate factor files for splits/dividends
+    exchange_code: str = "Q"  # Exchange code (Q=NASDAQ, N=NYSE, etc.)
 
 
 class VectorizedBlackScholes:
@@ -576,6 +583,132 @@ class FastOptionsGenerator:
         
         logger.info(f"Generated {len(trading_days)} coarse universe files")
     
+    def generate_coarse_fundamental_data(self) -> None:
+        """Generate daily coarse fundamental universe files for QC universe selection"""
+        if not self.config.generate_coarse_data:
+            return
+        
+        logger.info("Generating coarse fundamental data...")
+        
+        # Create directory structure
+        coarse_dir = Path(self.config.output_dir) / "equity" / "usa" / "fundamental" / "coarse"
+        coarse_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate file for each trading day
+        trading_days = self._get_trading_days()
+        
+        for trade_date in trading_days:
+            # Get underlying price for the day
+            underlying_close = self.price_provider.get_close(trade_date)
+            
+            # Generate SecurityIdentifier (format: SYMBOL + space + 12-char hash)
+            # Using consistent hash for reproducibility
+            security_id = f"{self.config.underlying_symbol} R735QTJ8XC9X"
+            
+            # Generate realistic volume based on symbol
+            if self.config.underlying_symbol.upper() == "SPY":
+                base_volume = 100_000_000  # SPY typically 50-150M shares
+            else:
+                base_volume = 10_000_000   # Generic stock volume
+            
+            volume_noise = self.market_data_generator.random_state.uniform(0.8, 1.2)
+            volume = int(base_volume * volume_noise)
+            
+            dollar_volume = int(underlying_close * volume)
+            
+            # Price and volume factors (will be properly set when we implement factor files)
+            price_factor = 1.0
+            volume_factor = 1.0
+            
+            # Create CSV file for the day
+            coarse_file = coarse_dir / f"{trade_date.strftime('%Y%m%d')}.csv"
+            
+            with open(coarse_file, 'w') as f:
+                # Write data without header (LEAN format)
+                f.write(f"{security_id},{self.config.underlying_symbol},{underlying_close:.2f},"
+                       f"{volume},{dollar_volume},False,{price_factor},{volume_factor}\n")
+        
+        logger.info(f"Generated {len(trading_days)} coarse fundamental files")
+    
+    def generate_security_database(self) -> None:
+        """Generate security database file for symbol identity resolution"""
+        if not self.config.generate_security_database:
+            return
+        
+        logger.info("Generating security database...")
+        
+        # Create directory structure
+        symbol_props_dir = Path(self.config.output_dir) / "symbol-properties"
+        symbol_props_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Use same SecurityIdentifier as in coarse data
+        security_id = f"{self.config.underlying_symbol} R735QTJ8XC9X"
+        
+        # Placeholder values for identifiers (in production, these would be real)
+        cik = "0000000000"  # 10-digit placeholder
+        bloomberg_ticker = f"BBG000{self.config.underlying_symbol[:3]}XXX"
+        composite_figi = "000000"
+        isin = f"US0000000000"  # US + 10 digits
+        primary_symbol = "000000"
+        
+        # Create security database
+        security_db_file = symbol_props_dir / "security-database.csv"
+        
+        with open(security_db_file, 'w') as f:
+            # Write single entry for our symbol
+            f.write(f"{security_id},{cik},{bloomberg_ticker},{composite_figi},{isin},{primary_symbol}\n")
+        
+        logger.info("Generated security database entry")
+    
+    def generate_equity_daily_data(self) -> None:
+        """Generate daily equity price data files for underlying symbol"""
+        if not self.config.generate_equity_daily:
+            return
+        
+        logger.info("Generating equity daily data...")
+        
+        # Create directory structure
+        equity_dir = Path(self.config.output_dir) / "equity" / "usa" / "daily"
+        equity_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get trading days
+        trading_days = self._get_trading_days()
+        
+        # Build daily price data
+        daily_data = []
+        for trade_date in trading_days:
+            # Get close price from price provider (real data from yfinance)
+            close_price = self.price_provider.get_close(trade_date)
+            
+            # Generate realistic OHLC around close price
+            # Daily volatility typically 1-2% for SPY
+            daily_vol = 0.015
+            open_price = close_price * (1 + self.market_data_generator.random_state.normal(0, daily_vol * 0.5))
+            high_price = max(open_price, close_price) * (1 + self.market_data_generator.random_state.uniform(0, daily_vol))
+            low_price = min(open_price, close_price) * (1 - self.market_data_generator.random_state.uniform(0, daily_vol))
+            
+            # Generate volume (use same logic as coarse data)
+            if self.config.underlying_symbol.upper() == "SPY":
+                base_volume = 100_000_000
+            else:
+                base_volume = 10_000_000
+            volume = int(base_volume * self.market_data_generator.random_state.uniform(0.8, 1.2))
+            
+            # Format: DateTime,Open,High,Low,Close,Volume (prices scaled by 10000)
+            date_str = trade_date.strftime('%Y%m%d 00:00')
+            daily_data.append(f"{date_str},{int(open_price * 10000)},{int(high_price * 10000)},"
+                             f"{int(low_price * 10000)},{int(close_price * 10000)},{volume}")
+        
+        # Create ZIP file
+        zip_path = equity_dir / f"{self.config.underlying_symbol.lower()}.zip"
+        csv_filename = f"{self.config.underlying_symbol.lower()}.csv"
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            csv_content = '\n'.join(daily_data)
+            zf.writestr(csv_filename, csv_content)
+        
+        logger.info(f"Generated equity daily data with {len(trading_days)} days")
+    
     def copy_to_target_directory(self) -> None:
         """Copy generated data to specified target directory with proper structure"""
         if not self.config.copy_target_dir:
@@ -654,6 +787,16 @@ class FastOptionsGenerator:
             self.generate_option_universe_data(contracts)
             self.generate_coarse_universe_data()
         
+        # Generate LEAN compatibility files
+        if self.config.generate_coarse_data:
+            self.generate_coarse_fundamental_data()
+        
+        if self.config.generate_security_database:
+            self.generate_security_database()
+        
+        if self.config.generate_equity_daily:
+            self.generate_equity_daily_data()
+        
         # Copy data to target directory if specified
         if self.config.copy_target_dir:
             self.copy_to_target_directory()
@@ -697,6 +840,17 @@ def main():
     parser.add_argument("--include-coarse-universe", dest="include_coarse_universe", action="store_true", help="Generate coarse universe files for underlying equity")
     parser.add_argument("--no-include-coarse-universe", dest="include_coarse_universe", action="store_false", help="Disable coarse universe generation (default)")
     parser.set_defaults(include_coarse_universe=False)
+    
+    # LEAN compatibility arguments
+    parser.add_argument("--generate-coarse-data", dest="generate_coarse_data", 
+                       action="store_true", help="Generate coarse fundamental data for QC universe selection (default on)")
+    parser.add_argument("--no-generate-coarse-data", dest="generate_coarse_data", 
+                       action="store_false", help="Disable coarse fundamental data generation")
+    parser.set_defaults(generate_coarse_data=True)
+    
+    parser.add_argument("--exchange-code", type=str, default="Q", 
+                       help="Exchange code for securities (Q=NASDAQ, N=NYSE, etc.)")
+    
     args = parser.parse_args()
 
     config = GeneratorConfig(
@@ -717,7 +871,9 @@ def main():
         dte_tolerance=args.dte_tolerance,
         generate_universes=args.generate_universes,
         copy_target_dir=args.copy_target_dir,
-        include_coarse_universe=args.include_coarse_universe
+        include_coarse_universe=args.include_coarse_universe,
+        generate_coarse_data=args.generate_coarse_data,
+        exchange_code=args.exchange_code
     )
 
     generator = FastOptionsGenerator(config)
