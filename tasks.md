@@ -160,10 +160,10 @@ This document outlines comprehensive improvements to make our fast options gener
 #### Task 6.6: Options File Naming Convention Fix
 **Priority: HIGH** | **Effort: ~15 lines** | **Files:** Individual contract CSV files within ZIP archives
 
-- [ ] **Update file naming to LEAN convention**
-- [ ] **Current:** `{date}_{symbol}_{type}.zip`
-- [ ] **Required:** `YYYYMMDD_symbol_minute_type_style_optiontype_strike_expiry.csv`
-- [ ] **Example:** `20140606_aapl_minute_trade_american_call_5900000_20140621.csv`
+- [x] **Update file naming to LEAN convention**
+- [x] **Current:** `{date}_{symbol}_{type}.zip`
+- [x] **Required:** `YYYYMMDD_symbol_minute_type_style_optiontype_strike_expiry.csv`
+- [x] **Example:** `20140606_aapl_minute_trade_american_call_5900000_20140621.csv`
 
 ### P6.3: MEDIUM PRIORITY (Improves Accuracy)
 

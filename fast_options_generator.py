@@ -498,11 +498,11 @@ class FastOptionsGenerator:
                 # Determine mode: overwrite if new, append otherwise
                 mode = 'w' if not zip_path.exists() else 'a'
                 
-                # CSV filename inside ZIP
+                # CSV filename inside ZIP (LEAN convention)
                 csv_filename = (
                     f"{contract.trade_date_str}_{contract.underlying.lower()}_"
                     f"{self.config.resolution}_{data_type}_american_{contract.option_type}_"
-                    f"{contract.strike_scaled:08d}_{contract.expiration_str}.csv"
+                    f"{contract.strike_scaled}_{contract.expiration_str}.csv"
                 )
 
                 # Write to ZIP file
