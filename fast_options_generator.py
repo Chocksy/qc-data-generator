@@ -23,6 +23,7 @@ import zipfile
 import threading
 import shutil
 import logging
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Third-party
@@ -113,12 +114,7 @@ class GeneratorConfig:
     generate_universes: bool = True  # Generate universe data files
     copy_target_dir: Optional[str] = None  # Target directory for copying (None = no copying)
     include_coarse_universe: bool = False  # Generate equity universe files
-    # LEAN compatibility flags for QuantConnect integration
-    generate_coarse_data: bool = True  # Generate coarse fundamental data
-    generate_security_database: bool = True  # Generate security database entries
-    generate_equity_daily: bool = True  # Generate equity daily data files
-    generate_map_files: bool = True  # Generate map files for symbol resolution
-    generate_factor_files: bool = True  # Generate factor files for splits/dividends
+    # LEAN data generation (always enabled - this is a LEAN data generator)
     exchange_code: str = "Q"  # Exchange code (Q=NASDAQ, N=NYSE, etc.)
 
 
@@ -585,9 +581,6 @@ class FastOptionsGenerator:
     
     def generate_coarse_fundamental_data(self) -> None:
         """Generate daily coarse fundamental universe files for QC universe selection"""
-        if not self.config.generate_coarse_data:
-            return
-        
         logger.info("Generating coarse fundamental data...")
         
         # Create directory structure
@@ -632,9 +625,6 @@ class FastOptionsGenerator:
     
     def generate_security_database(self) -> None:
         """Generate security database file for symbol identity resolution"""
-        if not self.config.generate_security_database:
-            return
-        
         logger.info("Generating security database...")
         
         # Create directory structure
@@ -662,9 +652,6 @@ class FastOptionsGenerator:
     
     def generate_equity_daily_data(self) -> None:
         """Generate daily equity price data files for underlying symbol"""
-        if not self.config.generate_equity_daily:
-            return
-        
         logger.info("Generating equity daily data...")
         
         # Create directory structure
@@ -711,9 +698,6 @@ class FastOptionsGenerator:
     
     def generate_map_files(self) -> None:
         """Generate ticker mapping files with exchange designation"""
-        if not self.config.generate_map_files:
-            return
-        
         logger.info("Generating map files...")
         
         # Create directory structure
@@ -733,9 +717,6 @@ class FastOptionsGenerator:
     
     def generate_factor_files(self) -> None:
         """Create split/dividend adjustment factor files"""
-        if not self.config.generate_factor_files:
-            return
-        
         logger.info("Generating factor files...")
         
         # Create directory structure
@@ -755,9 +736,6 @@ class FastOptionsGenerator:
     
     def generate_symbol_properties(self) -> None:
         """Generate symbol properties database with contract specifications"""
-        # Only generate if we have other symbol properties (reuse the security database flag)
-        if not self.config.generate_security_database:
-            return
         
         logger.info("Generating symbol properties database...")
         
@@ -779,6 +757,73 @@ class FastOptionsGenerator:
             f.write(f"{underlying} Option,usa,Option,100,0.01,1,USD,America/New_York\n")
         
         logger.info("Generated symbol properties database")
+    
+    def generate_market_hours(self) -> None:
+        """Generate market hours database with trading session definitions"""
+        
+        logger.info("Generating market hours database...")
+        
+        # Create directory structure
+        market_hours_dir = Path(self.config.output_dir) / "market-hours"
+        market_hours_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Define standard US equity market hours
+        market_hours_data = {
+            "equity": {
+                "market": "usa",
+                "timeZone": "America/New_York",
+                "sessions": {
+                    "regularMarket": {
+                        "start": "09:30:00",
+                        "end": "16:00:00"
+                    },
+                    "preMarket": {
+                        "start": "04:00:00", 
+                        "end": "09:30:00"
+                    },
+                    "afterHours": {
+                        "start": "16:00:00",
+                        "end": "20:00:00"
+                    }
+                },
+                "earlyCloseHours": {
+                    "start": "09:30:00",
+                    "end": "13:00:00"
+                }
+            }
+        }
+        
+        # Create market hours database JSON file
+        market_hours_file = market_hours_dir / "market-hours-database.json"
+        
+        with open(market_hours_file, 'w') as f:
+            json.dump(market_hours_data, f, indent=2)
+        
+        logger.info("Generated market hours database")
+    
+    def generate_shortable_securities(self) -> None:
+        """Generate shortable securities data for short selling availability"""
+        
+        logger.info("Generating shortable securities data...")
+        
+        # Create directory structure
+        shortable_dir = Path(self.config.output_dir) / "equity" / "usa" / "shortable" / "testbrokerage" / "symbols"
+        shortable_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get trading days
+        trading_days = self._get_trading_days()
+        
+        # Create shortable securities file for our underlying symbol
+        shortable_file = shortable_dir / f"{self.config.underlying_symbol.lower()}.csv"
+        
+        with open(shortable_file, 'w') as f:
+            for trading_day in trading_days:
+                date_str = trading_day.strftime("%Y%m%d")
+                # Use a reasonable default of available shares (e.g., 1M shares available for shorting)
+                available_shares = 1000000
+                f.write(f"{date_str},{available_shares}\n")
+        
+        logger.info(f"Generated shortable securities data for {len(trading_days)} trading days")
     
     def copy_to_target_directory(self) -> None:
         """Copy generated data to specified target directory with proper structure"""
@@ -858,25 +903,15 @@ class FastOptionsGenerator:
             self.generate_option_universe_data(contracts)
             self.generate_coarse_universe_data()
         
-        # Generate LEAN compatibility files
-        if self.config.generate_coarse_data:
-            self.generate_coarse_fundamental_data()
-        
-        if self.config.generate_security_database:
-            self.generate_security_database()
-        
-        if self.config.generate_equity_daily:
-            self.generate_equity_daily_data()
-        
-        if self.config.generate_map_files:
-            self.generate_map_files()
-        
-        if self.config.generate_factor_files:
-            self.generate_factor_files()
-        
-        # Generate symbol properties (MEDIUM priority)
-        if self.config.generate_security_database:
-            self.generate_symbol_properties()
+        # Generate all LEAN compatibility files (always enabled)
+        self.generate_coarse_fundamental_data()
+        self.generate_security_database()
+        self.generate_equity_daily_data()
+        self.generate_map_files()
+        self.generate_factor_files()
+        self.generate_symbol_properties()
+        self.generate_market_hours()
+        self.generate_shortable_securities()
         
         # Copy data to target directory if specified
         if self.config.copy_target_dir:
@@ -922,13 +957,7 @@ def main():
     parser.add_argument("--no-include-coarse-universe", dest="include_coarse_universe", action="store_false", help="Disable coarse universe generation (default)")
     parser.set_defaults(include_coarse_universe=False)
     
-    # LEAN compatibility arguments
-    parser.add_argument("--generate-coarse-data", dest="generate_coarse_data", 
-                       action="store_true", help="Generate coarse fundamental data for QC universe selection (default on)")
-    parser.add_argument("--no-generate-coarse-data", dest="generate_coarse_data", 
-                       action="store_false", help="Disable coarse fundamental data generation")
-    parser.set_defaults(generate_coarse_data=True)
-    
+    # LEAN data generation parameters
     parser.add_argument("--exchange-code", type=str, default="Q", 
                        help="Exchange code for securities (Q=NASDAQ, N=NYSE, etc.)")
     
@@ -953,7 +982,6 @@ def main():
         generate_universes=args.generate_universes,
         copy_target_dir=args.copy_target_dir,
         include_coarse_universe=args.include_coarse_universe,
-        generate_coarse_data=args.generate_coarse_data,
         exchange_code=args.exchange_code
     )
 

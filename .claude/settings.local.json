@@ -6,7 +6,8 @@
       "WebFetch(domain:py-vollib-vectorized.readthedocs.io)",
       "Bash(find:*)",
       "Bash(unzip:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(./run.sh generate:*)"
     ],
     "deny": []
   }
