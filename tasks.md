@@ -170,8 +170,8 @@ This document outlines comprehensive improvements to make our fast options gener
 #### Task 6.7: Symbol Properties Integration
 **Priority: MEDIUM** | **Effort: ~15 lines** | **Files:** `symbol-properties/symbol-properties-database.csv`
 
-- [ ] **Add contract specifications and multipliers**
-- [ ] **Standard equity option properties with timezone, currency, market designation**
+- [x] **Add contract specifications and multipliers**
+- [x] **Standard equity option properties with timezone, currency, market designation**
 
 #### Task 6.8: Market Hours Compliance
 **Priority: MEDIUM** | **Effort: ~10 lines** | **Files:** `market-hours/market-hours-database.json`

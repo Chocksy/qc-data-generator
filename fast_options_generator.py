@@ -753,6 +753,33 @@ class FastOptionsGenerator:
         
         logger.info("Generated factor file for split/dividend adjustments")
     
+    def generate_symbol_properties(self) -> None:
+        """Generate symbol properties database with contract specifications"""
+        # Only generate if we have other symbol properties (reuse the security database flag)
+        if not self.config.generate_security_database:
+            return
+        
+        logger.info("Generating symbol properties database...")
+        
+        # Create directory structure (reuse existing symbol-properties directory)
+        symbol_props_dir = Path(self.config.output_dir) / "symbol-properties"
+        symbol_props_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create symbol properties database file
+        props_db_file = symbol_props_dir / "symbol-properties-database.csv"
+        
+        with open(props_db_file, 'w') as f:
+            # Standard equity option properties
+            # Format: Symbol,Market,SecurityType,Multiplier,MinimumPriceVariation,LotSize,Currency,TimeZone
+            underlying = self.config.underlying_symbol.upper()
+            f.write(f"{underlying},usa,Equity,1,0.01,1,USD,America/New_York\n")
+            
+            # For options, we'd add option-specific properties
+            # Using simplified format for now
+            f.write(f"{underlying} Option,usa,Option,100,0.01,1,USD,America/New_York\n")
+        
+        logger.info("Generated symbol properties database")
+    
     def copy_to_target_directory(self) -> None:
         """Copy generated data to specified target directory with proper structure"""
         if not self.config.copy_target_dir:
@@ -846,6 +873,10 @@ class FastOptionsGenerator:
         
         if self.config.generate_factor_files:
             self.generate_factor_files()
+        
+        # Generate symbol properties (MEDIUM priority)
+        if self.config.generate_security_database:
+            self.generate_symbol_properties()
         
         # Copy data to target directory if specified
         if self.config.copy_target_dir:
