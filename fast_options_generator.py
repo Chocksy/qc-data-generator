@@ -709,6 +709,50 @@ class FastOptionsGenerator:
         
         logger.info(f"Generated equity daily data with {len(trading_days)} days")
     
+    def generate_map_files(self) -> None:
+        """Generate ticker mapping files with exchange designation"""
+        if not self.config.generate_map_files:
+            return
+        
+        logger.info("Generating map files...")
+        
+        # Create directory structure
+        map_dir = Path(self.config.output_dir) / "equity" / "usa" / "map_files"
+        map_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create map file with simple start/end date coverage
+        map_file = map_dir / f"{self.config.underlying_symbol.lower()}.csv"
+        
+        with open(map_file, 'w') as f:
+            # Write start date entry
+            f.write(f"19980102,{self.config.underlying_symbol.lower()},{self.config.exchange_code}\n")
+            # Write end date entry (far future)
+            f.write(f"20501231,{self.config.underlying_symbol.lower()},{self.config.exchange_code}\n")
+        
+        logger.info("Generated map file for ticker mapping")
+    
+    def generate_factor_files(self) -> None:
+        """Create split/dividend adjustment factor files"""
+        if not self.config.generate_factor_files:
+            return
+        
+        logger.info("Generating factor files...")
+        
+        # Create directory structure
+        factor_dir = Path(self.config.output_dir) / "equity" / "usa" / "factor_files"
+        factor_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create factor file with simple no-split scenario
+        factor_file = factor_dir / f"{self.config.underlying_symbol.lower()}.csv"
+        
+        with open(factor_file, 'w') as f:
+            # Write start date entry (PriceFactor=1, VolumeFactor=1, LastPrice=1)
+            f.write("19980102,1,1,1\n")
+            # Write end date entry (PriceFactor=1, VolumeFactor=1, LastPrice=0)
+            f.write("20501231,1,1,0\n")
+        
+        logger.info("Generated factor file for split/dividend adjustments")
+    
     def copy_to_target_directory(self) -> None:
         """Copy generated data to specified target directory with proper structure"""
         if not self.config.copy_target_dir:
@@ -796,6 +840,12 @@ class FastOptionsGenerator:
         
         if self.config.generate_equity_daily:
             self.generate_equity_daily_data()
+        
+        if self.config.generate_map_files:
+            self.generate_map_files()
+        
+        if self.config.generate_factor_files:
+            self.generate_factor_files()
         
         # Copy data to target directory if specified
         if self.config.copy_target_dir:

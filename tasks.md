@@ -146,16 +146,16 @@ This document outlines comprehensive improvements to make our fast options gener
 #### Task 6.4: Map Files Generation
 **Priority: HIGH** | **Effort: ~15 lines** | **Files:** `equity/usa/map_files/{symbol}.csv`
 
-- [ ] **Create ticker mapping files with exchange designation**
-- [ ] **Required Format:** `Date,Symbol,Exchange` (e.g., `19980102,aapl,Q`)
-- [ ] **Add exchange codes (Q=NASDAQ, P=NYSE, etc.)**
+- [x] **Create ticker mapping files with exchange designation**
+- [x] **Required Format:** `Date,Symbol,Exchange` (e.g., `19980102,aapl,Q`)
+- [x] **Add exchange codes (Q=NASDAQ, P=NYSE, etc.)**
 
 #### Task 6.5: Factor Files Generation  
 **Priority: HIGH** | **Effort: ~10 lines** | **Files:** `equity/usa/factor_files/{symbol}.csv`
 
-- [ ] **Create split/dividend adjustment factor files**
-- [ ] **Required Format:** `Date,PriceFactor,VolumeFactor,LastPrice`
-- [ ] **Simple Implementation:** `19980102,1,1,1` for no-split scenario
+- [x] **Create split/dividend adjustment factor files**
+- [x] **Required Format:** `Date,PriceFactor,VolumeFactor,LastPrice`
+- [x] **Simple Implementation:** `19980102,1,1,1` for no-split scenario
 
 #### Task 6.6: Options File Naming Convention Fix
 **Priority: HIGH** | **Effort: ~15 lines** | **Files:** Individual contract CSV files within ZIP archives
