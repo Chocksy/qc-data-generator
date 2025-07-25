@@ -154,6 +154,68 @@ class VectorizedBlackScholes:
         
         # Ensure minimum price
         return np.maximum(prices, 0.01)
+    
+    @staticmethod
+    def calculate_greeks_batch(S: np.ndarray, K: np.ndarray, T: np.ndarray, 
+                              r: float, sigma: float, option_types: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Calculate Greeks for batch of options using Black-Scholes model
+        
+        Args:
+            S: Underlying prices array
+            K: Strike prices array
+            T: Time to expiration array (in years)
+            r: Risk-free rate
+            sigma: Volatility
+            option_types: Array of 1 for calls, -1 for puts
+            
+        Returns:
+            Dictionary with Greeks arrays: delta, gamma, vega, theta, rho
+        """
+        # Avoid division by zero
+        T = np.maximum(T, 1e-8)
+        
+        # Calculate d1 and d2
+        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        
+        # Calculate standard normal PDF and CDF values
+        n_d1 = norm.pdf(d1)
+        N_d1 = norm.cdf(d1)
+        N_d2 = norm.cdf(d2)
+        N_neg_d1 = norm.cdf(-d1)
+        N_neg_d2 = norm.cdf(-d2)
+        
+        # Delta
+        call_delta = N_d1
+        put_delta = N_d1 - 1
+        delta = np.where(option_types == 1, call_delta, put_delta)
+        
+        # Gamma (same for calls and puts)
+        gamma = n_d1 / (S * sigma * np.sqrt(T))
+        
+        # Vega (same for calls and puts, convert to per 1% change)
+        vega = S * n_d1 * np.sqrt(T) / 100
+        
+        # Theta (per day)
+        call_theta = (-(S * n_d1 * sigma) / (2 * np.sqrt(T)) - 
+                     r * K * np.exp(-r * T) * N_d2) / 365
+        put_theta = (-(S * n_d1 * sigma) / (2 * np.sqrt(T)) + 
+                    r * K * np.exp(-r * T) * N_neg_d2) / 365
+        theta = np.where(option_types == 1, call_theta, put_theta)
+        
+        # Rho (per 1% change in interest rate)
+        call_rho = K * T * np.exp(-r * T) * N_d2 / 100
+        put_rho = -K * T * np.exp(-r * T) * N_neg_d2 / 100
+        rho = np.where(option_types == 1, call_rho, put_rho)
+        
+        return {
+            'delta': delta,
+            'gamma': gamma,
+            'vega': vega,
+            'theta': theta,
+            'rho': rho
+        }
 
 
 class MarketDataGenerator:
@@ -507,11 +569,11 @@ class FastOptionsGenerator:
                     zf.writestr(csv_filename, csv_content)
     
     def generate_option_universe_data(self, contracts: List[OptionContract]) -> None:
-        """Generate option universe files defining available contracts per day"""
+        """Generate option universe files defining available contracts per day in LEAN format"""
         if not self.config.generate_universes:
             return
             
-        logger.info("Generating option universe data...")
+        logger.info("Generating option universe data in LEAN format...")
         
         # Group contracts by underlying and trade date
         contracts_by_date = {}
@@ -528,18 +590,73 @@ class FastOptionsGenerator:
             
             universe_file = universe_dir / f"{trade_date.strftime('%Y%m%d')}.csv"
             
+            # Get underlying price for this day
+            underlying_close = self.price_provider.get_close(trade_date)
+            
+            # Generate underlying price path for OHLCV calculation
+            underlying_prices = self.market_data_generator.generate_underlying_prices(
+                trade_date, underlying_close, minutes=1
+            )
+            underlying_open = underlying_prices[0]
+            underlying_high = max(underlying_prices)
+            underlying_low = min(underlying_prices)
+            
+            # Generate realistic volume for underlying
+            base_volume = 100_000_000 if underlying == 'spy' else 50_000_000
+            volume_noise = self.market_data_generator.random_state.uniform(0.8, 1.2)
+            underlying_volume = int(base_volume * volume_noise)
+            
             with open(universe_file, 'w') as f:
-                # Write header
-                f.write("Symbol,Expiry,Strike,OptionType,Right\n")
+                # Write LEAN format header
+                f.write("#expiry,strike,right,open,high,low,close,volume,open_interest,implied_volatility,delta,gamma,vega,theta,rho\n")
+                
+                # Write underlying stock data row (second line)
+                f.write(f",,,{underlying_open:.4f},{underlying_high:.4f},{underlying_low:.4f},"
+                       f"{underlying_close:.4f},{underlying_volume},,,,,,,\n")
                 
                 # Sort contracts for consistent output
                 sorted_contracts = sorted(day_contracts, key=lambda c: (c.expiration, c.strike, c.option_type))
                 
+                # Process each option contract
                 for contract in sorted_contracts:
-                    f.write(f"{contract.lean_symbol},{contract.expiration_str},{contract.strike:.2f},"
-                           f"{contract.option_type.title()},{contract.option_type[0].upper()}\n")
+                    # Calculate time to expiration
+                    dte_days = (contract.expiration - contract.trade_date).days
+                    tte_years = max(dte_days / 365.0, 1e-8)
+                    
+                    # Calculate option price using Black-Scholes
+                    option_type_flag = 1 if contract.option_type == 'call' else -1
+                    option_close = VectorizedBlackScholes.price_batch(
+                        np.array([underlying_close]), np.array([contract.strike]), 
+                        np.array([tte_years]), self.config.risk_free_rate, 
+                        self.config.volatility, np.array([option_type_flag])
+                    )[0]
+                    
+                    # Generate realistic OHLC from close price
+                    option_open = option_close * self.market_data_generator.random_state.uniform(0.98, 1.02)
+                    option_high = option_close * self.market_data_generator.random_state.uniform(1.0, 1.05)
+                    option_low = option_close * self.market_data_generator.random_state.uniform(0.95, 1.0)
+                    
+                    # Calculate Greeks
+                    option_type_flag = 1 if contract.option_type == 'call' else -1
+                    greeks = VectorizedBlackScholes.calculate_greeks_batch(
+                        np.array([underlying_close]), np.array([contract.strike]),
+                        np.array([tte_years]), self.config.risk_free_rate,
+                        self.config.volatility, np.array([option_type_flag])
+                    )
+                    
+                    # Generate realistic volume and open interest
+                    option_volume = max(0, int(self.market_data_generator.random_state.exponential(100)))
+                    open_interest = max(0, int(self.market_data_generator.random_state.exponential(500)))
+                    
+                    # Format: expiry,strike,right,open,high,low,close,volume,open_interest,iv,delta,gamma,vega,theta,rho
+                    right = 'C' if contract.option_type == 'call' else 'P'
+                    f.write(f"{contract.expiration_str},{contract.strike},{right},"
+                           f"{option_open:.4f},{option_high:.4f},{option_low:.4f},{option_close:.4f},"
+                           f"{option_volume},{open_interest},{self.config.volatility:.7f},"
+                           f"{greeks['delta'][0]:.7f},{greeks['gamma'][0]:.7f},"
+                           f"{greeks['vega'][0]:.7f},{greeks['theta'][0]:.7f},{greeks['rho'][0]:.7f}\n")
         
-        logger.info(f"Generated {len(contracts_by_date)} option universe files")
+        logger.info(f"Generated {len(contracts_by_date)} option universe files in LEAN format")
     
     def generate_coarse_universe_data(self) -> None:
         """Generate coarse universe files for underlying equity (optional)"""
@@ -656,8 +773,11 @@ class FastOptionsGenerator:
                 logger.info(f"Security database entry for {self.config.underlying_symbol} already exists")
                 return
                 
-            # Append new entry
+            # Append new entry, ensuring proper line breaks
             with open(security_db_file, 'a') as f:
+                # Add newline if file doesn't end with one
+                if existing_content and not existing_content.endswith('\n'):
+                    f.write('\n')
                 f.write(f"{entry_line}\n")
         else:
             # Create new file with header comment and entry
@@ -825,18 +945,21 @@ class FastOptionsGenerator:
     
     def generate(self) -> None:
         """Main generation method with parallel processing"""
-        # Create output directory structure, but preserve symbol-properties for appending
+        # Create output directory structure
         output_base = Path(self.config.output_dir)
         
-        # Clear specific data directories but preserve symbol-properties
-        dirs_to_clear = ["option", "equity/usa/daily", "equity/usa/fundamental", 
-                        "equity/usa/map_files", "equity/usa/factor_files", 
-                        "equity/usa/shortable"]
-        
-        for dir_path in dirs_to_clear:
-            full_path = output_base / dir_path
-            if full_path.exists():
-                shutil.rmtree(full_path)
+        # Only clear directories if we're using the local generated_data folder
+        # When outputting to external directories (like LEAN data), preserve existing files
+        if self.config.output_dir == "generated_data":
+            # Clear specific data directories but preserve symbol-properties for appending
+            dirs_to_clear = ["option", "equity/usa/daily", "equity/usa/fundamental", 
+                            "equity/usa/map_files", "equity/usa/factor_files", 
+                            "equity/usa/shortable"]
+            
+            for dir_path in dirs_to_clear:
+                full_path = output_base / dir_path
+                if full_path.exists():
+                    shutil.rmtree(full_path)
         
         output_base.mkdir(parents=True, exist_ok=True)
 
