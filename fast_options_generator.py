@@ -624,8 +624,8 @@ class FastOptionsGenerator:
         logger.info(f"Generated {len(trading_days)} coarse fundamental files")
     
     def generate_security_database(self) -> None:
-        """Generate security database file for symbol identity resolution"""
-        logger.info("Generating security database...")
+        """Append security database entry for symbol identity resolution"""
+        logger.info("Updating security database...")
         
         # Create directory structure
         symbol_props_dir = Path(self.config.output_dir) / "symbol-properties"
@@ -641,14 +641,31 @@ class FastOptionsGenerator:
         isin = f"US0000000000"  # US + 10 digits
         primary_symbol = "000000"
         
-        # Create security database
+        # Security database file
         security_db_file = symbol_props_dir / "security-database.csv"
         
-        with open(security_db_file, 'w') as f:
-            # Write single entry for our symbol
-            f.write(f"{security_id},{cik},{bloomberg_ticker},{composite_figi},{isin},{primary_symbol}\n")
+        # Check if entry already exists
+        entry_line = f"{security_id},{cik},{bloomberg_ticker},{composite_figi},{isin},{primary_symbol}"
         
-        logger.info("Generated security database entry")
+        if security_db_file.exists():
+            # Read existing content to check for duplicates
+            with open(security_db_file, 'r') as f:
+                existing_content = f.read()
+            
+            if security_id in existing_content:
+                logger.info(f"Security database entry for {self.config.underlying_symbol} already exists")
+                return
+                
+            # Append new entry
+            with open(security_db_file, 'a') as f:
+                f.write(f"{entry_line}\n")
+        else:
+            # Create new file with header comment and entry
+            with open(security_db_file, 'w') as f:
+                f.write("# Security database entries for symbol identity resolution\n")
+                f.write(f"{entry_line}\n")
+        
+        logger.info(f"Added security database entry for {self.config.underlying_symbol}")
     
     def generate_equity_daily_data(self) -> None:
         """Generate daily equity price data files for underlying symbol"""
@@ -734,73 +751,6 @@ class FastOptionsGenerator:
         
         logger.info("Generated factor file for split/dividend adjustments")
     
-    def generate_symbol_properties(self) -> None:
-        """Generate symbol properties database with contract specifications"""
-        
-        logger.info("Generating symbol properties database...")
-        
-        # Create directory structure (reuse existing symbol-properties directory)
-        symbol_props_dir = Path(self.config.output_dir) / "symbol-properties"
-        symbol_props_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create symbol properties database file
-        props_db_file = symbol_props_dir / "symbol-properties-database.csv"
-        
-        with open(props_db_file, 'w') as f:
-            # Standard equity option properties
-            # Format: Symbol,Market,SecurityType,Multiplier,MinimumPriceVariation,LotSize,Currency,TimeZone
-            underlying = self.config.underlying_symbol.upper()
-            f.write(f"{underlying},usa,Equity,1,0.01,1,USD,America/New_York\n")
-            
-            # For options, we'd add option-specific properties
-            # Using simplified format for now
-            f.write(f"{underlying} Option,usa,Option,100,0.01,1,USD,America/New_York\n")
-        
-        logger.info("Generated symbol properties database")
-    
-    def generate_market_hours(self) -> None:
-        """Generate market hours database with trading session definitions"""
-        
-        logger.info("Generating market hours database...")
-        
-        # Create directory structure
-        market_hours_dir = Path(self.config.output_dir) / "market-hours"
-        market_hours_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Define standard US equity market hours
-        market_hours_data = {
-            "equity": {
-                "market": "usa",
-                "timeZone": "America/New_York",
-                "sessions": {
-                    "regularMarket": {
-                        "start": "09:30:00",
-                        "end": "16:00:00"
-                    },
-                    "preMarket": {
-                        "start": "04:00:00", 
-                        "end": "09:30:00"
-                    },
-                    "afterHours": {
-                        "start": "16:00:00",
-                        "end": "20:00:00"
-                    }
-                },
-                "earlyCloseHours": {
-                    "start": "09:30:00",
-                    "end": "13:00:00"
-                }
-            }
-        }
-        
-        # Create market hours database JSON file
-        market_hours_file = market_hours_dir / "market-hours-database.json"
-        
-        with open(market_hours_file, 'w') as f:
-            json.dump(market_hours_data, f, indent=2)
-        
-        logger.info("Generated market hours database")
-    
     def generate_shortable_securities(self) -> None:
         """Generate shortable securities data for short selling availability"""
         
@@ -875,10 +825,19 @@ class FastOptionsGenerator:
     
     def generate(self) -> None:
         """Main generation method with parallel processing"""
-        # Clear previous output directory to avoid duplicate entries
+        # Create output directory structure, but preserve symbol-properties for appending
         output_base = Path(self.config.output_dir)
-        if output_base.exists():
-            shutil.rmtree(output_base)
+        
+        # Clear specific data directories but preserve symbol-properties
+        dirs_to_clear = ["option", "equity/usa/daily", "equity/usa/fundamental", 
+                        "equity/usa/map_files", "equity/usa/factor_files", 
+                        "equity/usa/shortable"]
+        
+        for dir_path in dirs_to_clear:
+            full_path = output_base / dir_path
+            if full_path.exists():
+                shutil.rmtree(full_path)
+        
         output_base.mkdir(parents=True, exist_ok=True)
 
         logger.info("Starting high-performance options data generation")
@@ -909,8 +868,6 @@ class FastOptionsGenerator:
         self.generate_equity_daily_data()
         self.generate_map_files()
         self.generate_factor_files()
-        self.generate_symbol_properties()
-        self.generate_market_hours()
         self.generate_shortable_securities()
         
         # Copy data to target directory if specified
