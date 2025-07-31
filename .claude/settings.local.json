@@ -8,7 +8,10 @@
       "Bash(unzip:*)",
       "Bash(ls:*)",
       "Bash(./run.sh generate:*)",
-      "WebFetch(domain:www.quantconnect.com)"
+      "WebFetch(domain:www.quantconnect.com)",
+      "Bash(python:*)",
+      "Bash(uv run:*)",
+      "WebFetch(domain:docs.anthropic.com)"
     ],
     "deny": []
   }

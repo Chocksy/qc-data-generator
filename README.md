@@ -107,6 +107,24 @@ uv run python fast_options_generator.py \
   --end-date 2024-01-31 \
   --include-coarse-universe \
   --copy-target-dir /path/to/data
+
+# Use custom underlying price data from CSV
+uv run python fast_options_generator.py \
+  --start-date 2024-01-01 \
+  --end-date 2024-01-31 \
+  --underlying SPY \
+  --underlying-csv /path/to/spy_prices.csv \
+  --copy-target-dir /path/to/data
+
+# Generate with custom expiration schedule and exchange code
+uv run python fast_options_generator.py \
+  --start-date 2024-01-01 \
+  --end-date 2024-01-31 \
+  --underlying QQQ \
+  --daily-expirations-start 2024-01-15 \
+  --expiry-weekdays 1,3,5 \
+  --exchange-code Q \
+  --copy-target-dir /path/to/data
 ```
 
 ## 📊 Configuration Options
@@ -124,13 +142,22 @@ uv run python fast_options_generator.py \
 - `--generate-universes`: Generate universe files (default: on)
 - `--no-generate-universes`: Disable universe generation
 - `--include-coarse-universe`: Generate equity universe files for underlying
+- `--no-include-coarse-universe`: Disable coarse universe generation (default)
 
-### Advanced Options
-- `--base-price`: Base underlying price (default: 400.0)
-- `--risk-free-rate`: Risk-free rate (default: 0.02)
-- `--volatility`: Implied volatility (default: 0.20)
-- `--resolution`: Data resolution (default: minute)
+### Underlying Price Data Options
 - `--fetch-underlying`: Download real prices via yfinance (default: on)
+- `--no-fetch-underlying`: Disable yfinance download and use constant base price
+- `--underlying-csv`: Path to CSV with date,close for underlying prices
+- `--base-price`: Base underlying price when not fetching real data (default: 400.0)
+
+### Advanced Scheduling Options
+- `--daily-expirations-start`: Date when daily expirations begin (default: 2023-04-10)
+- `--expiry-weekdays`: Comma-separated weekdays (0=Mon) for weekly expirations (default: 0,2,4)
+- `--dte-tolerance`: ±Days tolerance when matching DTE window (default: 2)
+
+### Technical Options
+- `--resolution`: Data resolution (default: minute)
+- `--exchange-code`: Exchange code for securities (default: Q for NASDAQ; N=NYSE, etc.)
 
 ## 📁 Output Structure
 
