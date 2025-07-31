@@ -244,15 +244,38 @@ class MarketDataGenerator:
         
         return prices
     
+    def generate_constrained_underlying_prices(self, trade_date: datetime, target_close: float, minutes: int = 390) -> np.ndarray:
+        """Generate underlying price path that converges to target_close price"""
+        # Generate open price around target close (realistic opening gap)
+        open_price = target_close * (1 + self.random_state.normal(0, 0.005))
+        
+        # Generate random walk that will be adjusted to hit target close
+        returns = self.random_state.normal(0, 0.001, minutes)
+        cum_returns = np.cumsum(returns)
+        
+        # Adjust the path to converge to target close
+        # The final return should result in target_close when applied to open_price
+        target_final_return = np.log(target_close / open_price)
+        adjustment = (target_final_return - cum_returns[-1]) / minutes
+        
+        # Apply linear adjustment to ensure convergence
+        adjustments = np.linspace(0, adjustment * minutes, minutes)
+        adjusted_returns = cum_returns + adjustments
+        
+        # Generate price path that ends at target_close
+        prices = open_price * np.exp(adjusted_returns)
+        
+        return prices
+    
     def generate_minute_timestamps(self, trade_date: datetime) -> List[int]:
-        """Generate millisecond timestamps for trading minutes"""
+        """Generate millisecond timestamps for trading minutes (milliseconds since midnight)"""
         market_open = datetime.combine(trade_date, datetime.min.time().replace(hour=9, minute=30))
         
         timestamps = []
         for minute in range(390):  # 390 minutes in trading day
             time_obj = market_open + timedelta(minutes=minute)
-            # Convert to milliseconds since market open
-            milliseconds = minute * 60 * 1000
+            # Convert to milliseconds since midnight (LEAN format)
+            milliseconds = (time_obj.hour * 3600 + time_obj.minute * 60 + time_obj.second) * 1000
             timestamps.append(milliseconds)
         
         return timestamps
@@ -825,18 +848,34 @@ class FastOptionsGenerator:
         if security_db_file.exists():
             # Read existing content to check for duplicates
             with open(security_db_file, 'r') as f:
-                existing_content = f.read()
+                existing_lines = f.readlines()
             
-            if security_id in existing_content:
-                logger.info(f"Security database entry for {self.config.underlying_symbol} already exists")
-                return
-                
-            # Append new entry, ensuring proper line breaks
-            with open(security_db_file, 'a') as f:
-                # Add newline if file doesn't end with one
-                if existing_content and not existing_content.endswith('\n'):
-                    f.write('\n')
-                f.write(f"{entry_line}\n")
+            # Check if entry already exists and if it needs updating
+            entry_exists = False
+            updated_lines = []
+            
+            for line in existing_lines:
+                if line.strip() and not line.startswith('#') and security_id in line:
+                    # Found existing entry - replace with new one (potentially with real identifiers)
+                    updated_lines.append(f"{entry_line}\n")
+                    entry_exists = True
+                    logger.info(f"Updated security database entry for {self.config.underlying_symbol}")
+                else:
+                    updated_lines.append(line)
+            
+            if entry_exists:
+                # Write back the updated content
+                with open(security_db_file, 'w') as f:
+                    f.writelines(updated_lines)
+            else:
+                # Append new entry
+                with open(security_db_file, 'a') as f:
+                    # Add newline if file doesn't end with one
+                    existing_content = ''.join(existing_lines)
+                    if existing_content and not existing_content.endswith('\n'):
+                        f.write('\n')
+                    f.write(f"{entry_line}\n")
+                logger.info(f"Added new security database entry for {self.config.underlying_symbol}")
         else:
             # Create new file with header comment and entry
             with open(security_db_file, 'w') as f:
@@ -890,6 +929,151 @@ class FastOptionsGenerator:
             zf.writestr(csv_filename, csv_content)
         
         logger.info(f"Generated equity daily data with {len(trading_days)} days")
+    
+    def generate_equity_minute_data(self) -> None:
+        """Generate minute-level equity data files for underlying symbol"""
+        logger.info("Generating equity minute data...")
+        
+        # Create directory structure
+        equity_dir = Path(self.config.output_dir) / "equity" / "usa" / "minute" / self.config.underlying_symbol.lower()
+        equity_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get trading days
+        trading_days = self._get_trading_days()
+        
+        for trade_date in trading_days:
+            # Get actual close price from yfinance data
+            target_close = self.price_provider.get_close(trade_date)
+            
+            # Generate intraday prices that converge to target close
+            underlying_prices = self.market_data_generator.generate_constrained_underlying_prices(trade_date, target_close)
+            timestamps = self.market_data_generator.generate_minute_timestamps(trade_date)
+            
+            # Generate equity data for this day
+            equity_data = self._generate_equity_minute_data_for_day(trade_date, underlying_prices, timestamps)
+            
+            # Write data to ZIP files
+            self._write_equity_minute_data(trade_date, equity_data)
+        
+        logger.info(f"Generated equity minute data for {len(trading_days)} trading days")
+    
+    def _generate_equity_minute_data_for_day(self, trade_date: datetime, 
+                                           underlying_prices: np.ndarray, 
+                                           timestamps: List[int]) -> Dict[str, pd.DataFrame]:
+        """Generate equity minute data for a single day"""
+        minutes = len(underlying_prices)
+        
+        # Generate bid/ask spreads (typically 0.01-0.02% for SPY)
+        spread_pct = self.market_data_generator.random_state.uniform(0.0001, 0.0002, minutes)
+        bid_prices = underlying_prices * (1 - spread_pct / 2)
+        ask_prices = underlying_prices * (1 + spread_pct / 2)
+        
+        # For trade data, use the mid price with small noise
+        trade_prices = (bid_prices + ask_prices) / 2
+        trade_noise = self.market_data_generator.random_state.normal(0, 0.0001, minutes)
+        trade_prices = trade_prices * (1 + trade_noise)
+        
+        # Generate OHLC for each minute (trade data)
+        # For simplicity, use the trade price as close, and generate realistic OHLC
+        close_prices = trade_prices
+        
+        # Generate minute-level OHLC with small intraday variations
+        minute_vol = 0.0002  # 0.02% minute volatility
+        open_prices = np.roll(close_prices, 1)  # Previous minute's close becomes open
+        open_prices[0] = close_prices[0]  # First minute open = close
+        
+        # Generate high/low with realistic spreads
+        high_prices = close_prices * (1 + self.market_data_generator.random_state.uniform(0, minute_vol, minutes))
+        low_prices = close_prices * (1 - self.market_data_generator.random_state.uniform(0, minute_vol, minutes))
+        
+        # Ensure OHLC constraints
+        high_prices = np.maximum(high_prices, np.maximum(open_prices, close_prices))
+        low_prices = np.minimum(low_prices, np.minimum(open_prices, close_prices))
+        
+        # Generate volumes (SPY typically has high volume)
+        base_volume = 100000 if self.config.underlying_symbol.upper() == "SPY" else 10000
+        volumes = self.market_data_generator.random_state.randint(
+            int(base_volume * 0.5), int(base_volume * 2), minutes
+        )
+        
+        # Generate bid/ask sizes
+        bid_sizes = self.market_data_generator.random_state.randint(100, 1000, minutes)
+        ask_sizes = self.market_data_generator.random_state.randint(100, 1000, minutes)
+        
+        # Scale prices by 10,000 for LEAN format
+        bid_open_scaled = (bid_prices * 10000).astype(int)
+        bid_high_scaled = (bid_prices * 10000).astype(int)  # For quote data, bid doesn't vary much intraday
+        bid_low_scaled = (bid_prices * 10000).astype(int)
+        bid_close_scaled = (bid_prices * 10000).astype(int)
+        
+        ask_open_scaled = (ask_prices * 10000).astype(int)
+        ask_high_scaled = (ask_prices * 10000).astype(int)  # For quote data, ask doesn't vary much intraday
+        ask_low_scaled = (ask_prices * 10000).astype(int)
+        ask_close_scaled = (ask_prices * 10000).astype(int)
+        
+        trade_open_scaled = (open_prices * 10000).astype(int)
+        trade_high_scaled = (high_prices * 10000).astype(int)
+        trade_low_scaled = (low_prices * 10000).astype(int)
+        trade_close_scaled = (close_prices * 10000).astype(int)
+        
+        # Create quote data DataFrame
+        # Format: milliseconds,bidopen,bidhigh,bidlow,bidclose,lastbidsize,askopen,askhigh,asklow,askclose,lastasksize
+        quote_data = pd.DataFrame({
+            'milliseconds': timestamps,
+            'bidopen': bid_open_scaled,
+            'bidhigh': bid_high_scaled,
+            'bidlow': bid_low_scaled,
+            'bidclose': bid_close_scaled,
+            'lastbidsize': bid_sizes,
+            'askopen': ask_open_scaled,
+            'askhigh': ask_high_scaled,
+            'asklow': ask_low_scaled,
+            'askclose': ask_close_scaled,
+            'lastasksize': ask_sizes
+        })
+        
+        # Create trade data DataFrame
+        # Format: milliseconds,open,high,low,close,quantity
+        trade_data = pd.DataFrame({
+            'milliseconds': timestamps,
+            'open': trade_open_scaled,
+            'high': trade_high_scaled,
+            'low': trade_low_scaled,
+            'close': trade_close_scaled,
+            'quantity': volumes
+        })
+        
+        return {
+            'quote': quote_data,
+            'trade': trade_data
+        }
+    
+    def _write_equity_minute_data(self, trade_date: datetime, equity_data: Dict[str, pd.DataFrame]) -> None:
+        """Write equity minute data to ZIP files"""
+        date_str = trade_date.strftime('%Y%m%d')
+        symbol_lower = self.config.underlying_symbol.lower()
+        
+        # Create directory
+        equity_dir = Path(self.config.output_dir) / "equity" / "usa" / "minute" / symbol_lower
+        equity_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Write quote data
+        quote_zip_path = equity_dir / f"{date_str}_quote.zip"
+        quote_csv_filename = f"{date_str}_{symbol_lower}_minute_quote.csv"
+        
+        with ZIP_WRITE_LOCK:
+            with zipfile.ZipFile(quote_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                csv_content = equity_data['quote'].to_csv(index=False, header=False)
+                zf.writestr(quote_csv_filename, csv_content)
+        
+        # Write trade data
+        trade_zip_path = equity_dir / f"{date_str}_trade.zip"
+        trade_csv_filename = f"{date_str}_{symbol_lower}_minute_trade.csv"
+        
+        with ZIP_WRITE_LOCK:
+            with zipfile.ZipFile(trade_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                csv_content = equity_data['trade'].to_csv(index=False, header=False)
+                zf.writestr(trade_csv_filename, csv_content)
     
     def generate_map_files(self) -> None:
         """Generate ticker mapping files with exchange designation"""
@@ -1010,7 +1194,7 @@ class FastOptionsGenerator:
         # When outputting to external directories (like LEAN data), preserve existing files
         if self.config.output_dir == "generated_data":
             # Clear specific data directories but preserve symbol-properties for appending
-            dirs_to_clear = ["option", "equity/usa/daily", "equity/usa/fundamental", 
+            dirs_to_clear = ["option", "equity/usa/daily", "equity/usa/minute", "equity/usa/fundamental", 
                             "equity/usa/map_files", "equity/usa/factor_files", 
                             "equity/usa/shortable"]
             
@@ -1047,6 +1231,7 @@ class FastOptionsGenerator:
         self.generate_coarse_fundamental_data()
         self.generate_security_database()
         self.generate_equity_daily_data()
+        self.generate_equity_minute_data()
         self.generate_map_files()
         self.generate_factor_files()
         self.generate_shortable_securities()
